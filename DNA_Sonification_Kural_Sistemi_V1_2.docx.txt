@@ -1,0 +1,305 @@
+﻿DNA Sonification Projesi
+Solo Piyano İçin Kural Sistemi (V1.2 – Sade, Deterministik, Estetik)
+Bu doküman, DNA dizilerinden solo piyano estetiğinde müzik üretmek için kullanılan kural setini açık ve uygulanabilir şekilde tanımlar. Kurallar deterministiktir (aynı DNA → aynı müzik). Sistem gam içinde kalır, akor içerir, ‘tek nota vurma’ ve ‘kopya ölçü’ davranışlarını engeller.
+
+
+1. Amaç ve Tasarım İlkeleri
+Amaç: Her DNA dizisi için (i) benzersiz bir gam kimliği (tonik + mod), (ii) akor destekli tonal yürüyüş, (iii) DNA boyunca değişen ritim/yoğunluk ile solo piyano MIDI üretmek.
+Tasarım ilkeleri: (a) Sadelik: az seçenek, az parametre; (b) Kesin çalışma: gam dışına çıkmama, stabil progresyon; (c) Kimlik: tonik+mod deterministik; (d) Anti-monoton: AAA yasağı ve kopya ölçü engeli.
+
+
+2. Girdi, Çıktı ve Varsayılanlar
+Girdi: DNA dizisi (FASTA veya ham).
+Çıktı: Solo piyano MIDI, zaman imzası 4/4.
+2.1 Varsayılan üretim parametreleri
+Parametre
+	Varsayılan
+	Not
+	Parça süresi
+	120 sn
+	İstenirse değiştirilebilir.
+	Zaman imzası
+	4/4
+	Sistem bu imza için tasarlanmıştır.
+	DNA pencere (window)
+	300 bp
+	Her pencere 1 ölçü üretir.
+	DNA kayma (stride)
+	150 bp
+	Örtüşmeli pencereler.
+	Akor değişimi
+	Her ölçü
+	1 ölçü = 1 akor.
+	
+
+3. Deterministik Seçim Mekanizması
+Tüm seçimler kriptografik hash ile yapılır (örn. SHA‑256). Programlama dilindeki built‑in hash kullanılmaz (ortama göre değişebilir).
+Tanım: SHA256(x) çıktısı bir tamsayıya çevrilir ve mod işlemleriyle indeks üretilir.
+
+
+4. DNA Kimliği: Tonik + Mod Seçimi
+Her DNA için tek bir ‘kimlik gamı’ seçilir ve parça boyunca sabit kalır.
+4.1 Tonik (12 pitch class) seçimi
+tonic_idx = SHA256(DNA[0:1200]) mod 12
+idx
+	Tonik
+	0
+	C
+	1
+	C#/Db
+	2
+	D
+	3
+	D#/Eb
+	4
+	E
+	5
+	F
+	6
+	F#/Gb
+	7
+	G
+	8
+	G#/Ab
+	9
+	A
+	10
+	A#/Bb
+	11
+	B
+	
+
+4.2 Mod (4 tip) seçimi
+mode_idx = SHA256(DNA[1200:2400]) mod 4
+idx
+	Mod
+	0
+	Major (Ionian)
+	1
+	Natural Minor (Aeolian)
+	2
+	Dorian
+	3
+	Phrygian
+	
+
+4.3 Gam oluşturma
+Tonik ve mod belirlendikten sonra, gamın 7 derecesi (scale degrees) oluşturulur. Üretilecek tüm notalar ve akorlar bu gam kümesinden seçilir (gam dışına çıkılmaz).
+
+
+5. Harmoni: Diatonik Akorlar ve Progresyon
+5.1 Diatonik triad kalite tablosu (derece bazında)
+Mod
+	I
+	ii
+	iii
+	IV
+	V
+	vi
+	vii
+	Major
+	maj
+	min
+	min
+	maj
+	maj
+	min
+	dim
+	Natural Minor
+	min
+	dim
+	maj
+	min
+	min
+	maj
+	maj
+	Dorian
+	min
+	min
+	maj
+	maj
+	min
+	dim
+	maj
+	Phrygian
+	min
+	maj
+	maj
+	min
+	dim
+	maj
+	min
+	
+
+5.2 Progresyon şablonları (sade ve güvenli)
+Sistem yalnızca 2 progresyon şablonu kullanır (tonaliteyi ve estetiği korumak için):
+• Prog A: I – vi – IV – V
+• Prog B: vi – IV – I – V
+5.3 DNA’dan progresyon seçimi
+Purine oranı: purine_ratio = (A+G)/N (DNA[0:1200] üzerinde).
+Koşul
+	Seçim
+	purine_ratio < 0.50
+	Prog A
+	purine_ratio ≥ 0.50
+	Prog B
+	
+
+5.4 Akor zamanlaması
+Her ölçüde 1 akor çalınır. Progresyon 4 ölçülük bloklar halinde akar. (Akor şablonu tekrarlayabilir; anti-tekrar hedefi ölçü içi melodi/doku kopyasını engellemeye odaklanır.)
+5.5 Opsiyonel tek süs (add9)
+Sadelik için varsayılan triad’dır. İstenirse: her 4 ölçüde en fazla 1 akora add9 eklenebilir (gerilim/renk).
+
+
+6. Tempo ve Ölçü Sayısı
+6.1 Tempo seçimi (3 seviye)
+DNA çeşitliliğinden normalize bir entropy/çeşitlilik skoru h ∈ [0,1] elde edilir ve BPM seçilir:
+h aralığı
+	BPM
+	Karakter
+	0.00–0.33
+	80
+	sakin
+	0.33–0.66
+	92
+	orta
+	0.66–1.00
+	104
+	hareketli
+	
+
+6.2 120 saniye için ölçü sayısı (4/4)
+BPM
+	Toplam beat
+	Ölçü sayısı
+	80
+	160
+	40
+	92
+	184
+	46
+	104
+	208
+	52
+	
+
+Kural: 1 DNA penceresi = 1 ölçü. Bu nedenle hedef ölçü sayısı kadar pencere kullanılır.
+
+
+7. Ritim ve Doku: Pattern Bankası
+7.1 3 güvenli pattern tanımı
+P1 (Ballad): Ölçü başında akor vuruşları + 4 vuruş melodi.
+P2 (Broken Chord): 8’lik kırık akor (neo-klasik/piyano hissi) + melodi vurgusu.
+P3 (Arpej): 8’lik arpej (akışkan doku) + melodi.
+7.2 Pattern seçimi (DNA energy)
+DNA penceresinden energy E ∈ [0,1] çıkarılır ve pattern seçilir:
+E aralığı
+	Pattern
+	0.00–0.33
+	P1
+	0.33–0.66
+	P2
+	0.66–1.00
+	P3
+	
+
+
+
+8. Melodi: Nota Seçimi Kuralları
+Her ölçüde 4 vuruş için 4 melodi notası üretilir. Seçim gam içinde ve akor uyumlu olacak şekilde yapılır.
+8.1 Vuruş bazlı öncelik (estetik çekirdek)
+Beat
+	Birincil seçim
+	İkincil seçim
+	1
+	Akor tonu (1/3/5)
+	Gam tonu
+	2
+	Geçiş tonu (±1 derece)
+	Akor tonu
+	3
+	Akor tonu (1/3/5)
+	Gam tonu
+	4
+	Geçiş tonu (±1 derece)
+	Akor tonu
+	
+
+8.2 Melodik hareket (sade aralık kontrolü)
+DNA penceresinden step büyüklüğü (1–5 derece) ve yön (yukarı/aşağı) deterministik seçilir. Büyük sıçrama oluşursa bir sonraki beat mutlaka ±1 ile toparlanır.
+Step
+	Kural
+	1–2
+	Stepwise (varsayılan)
+	3
+	Küçük sıçrama
+	4–5
+	Nadir sıçrama → sonraki beat ±1 düzeltme
+	
+
+
+
+9. Anti-Monotonluk Kuralları
+9.1 AAA yasağı (tek nota vurma engeli)
+Aynı pitch art arda 3 kez gelemez. 3. tekrar oluşacaksa nota gam içinde ±1 derece kaydırılarak düzeltilir.
+9.2 Kopya ölçü engeli (birebir tekrar yok)
+Her ölçü için imza üretilir: sig = SHA256(window) mod 16.
+Eğer sig önceki ölçüyle aynıysa iki küçük varyasyon uygulanır:
+• Beat 2 notası gam içinde ±2 derece kaydırılır.
+• Beat 4’ün ritmi 1/4 yerine iki 1/8 olacak şekilde bölünür.
+Bu varyasyonlar müzikaliteyi bozmadan birebir tekrar riskini ortadan kaldırır.
+
+
+10. Piyano Yerleşimi (Voicing)
+10.1 Sol el (LH) – sabit güvenli kalıp
+Her ölçü başında Root + 5th (power). Energy yüksekse root oktav eklenebilir.
+10.2 Sağ el (RH) – melodi + pattern
+Sağ el, melodi notalarını çalar ve seçilen pattern’e göre kırık akor/arpej doku ekler. Tüm notalar gam içinde kalır.
+
+
+11. Dinamik (Velocity)
+Dinamik 3 seviye ile yönetilir. Skor DNA penceresinden türetilen bir ‘strength’ ölçümüne (örn. H‑bond) bağlanabilir.
+Strength aralığı
+	Velocity
+	0.00–0.33
+	55
+	0.33–0.66
+	72
+	0.66–1.00
+	88
+	
+
+12. Tek Bakışta Spesifikasyon
+Karar
+	DNA Kaynağı
+	Çıktı
+	Tonik
+	DNA[0:1200] → SHA mod 12
+	C..B
+	Mod
+	DNA[1200:2400] → SHA mod 4
+	Maj/Min/Dor/Phr
+	Progresyon
+	purine_ratio (DNA[0:1200])
+	Prog A veya B
+	Tempo
+	entropy h
+	80 / 92 / 104 BPM
+	Ölçü sayısı
+	Süre + BPM
+	40 / 46 / 52 (120 sn)
+	Pattern
+	energy E (window)
+	P1 / P2 / P3
+	Melodi seçimi
+	Beat önceliği + step
+	Chord-tone + passing-tone
+	AAA engeli
+	son 2 notaya bak
+	±1 derece düzeltme
+	Kopya ölçü engeli
+	sig(window)
+	Beat2 ±2 + Beat4 split
+	Dinamik
+	strength (window)
+	55 / 72 / 88
