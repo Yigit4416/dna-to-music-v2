@@ -26,6 +26,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stride", type=int, default=150, help="Kayma miktari. Varsayilan: 150")
     parser.add_argument("--title", default="DNA Sonification", help="Parca basligi.")
     parser.add_argument("--enable-add9", action="store_true", help="Her 4 olcude en fazla bir add9 suslemeyi aktif eder.")
+    parser.add_argument("--use-ai", action="store_true", help="AI tabanli uretim motorunu (Bio-Conductor) kullanir.")
+    parser.add_argument("--ai-pretrained", action="store_true", help="HuggingFace uzerinden on egitimli model kullanir (varsayilan yerel CNN'dir).")
+    parser.add_argument("--conductor-weights", type=Path, help="Egitilmis Conductor model agirliklari (ornek: conductor.pt).")
     return parser
 
 
@@ -65,7 +68,15 @@ def main() -> int:
             enable_add9=args.enable_add9,
             title=args.title,
         )
-        score, summary = sonify_sequence(sequence=sequence, config=config, source_label=label)
+        
+        ai_pipeline = None
+        if args.use_ai:
+            print("AI hatti baslatiliyor (Bu islem biraz zaman alabilir)...")
+            from .conductor import get_conductor_pipeline
+            weights_path = str(args.conductor_weights) if args.conductor_weights else None
+            ai_pipeline = get_conductor_pipeline(use_pretrained=args.ai_pretrained, weights_path=weights_path)
+
+        score, summary = sonify_sequence(sequence=sequence, config=config, source_label=label, ai_pipeline=ai_pipeline)
 
         args.output.parent.mkdir(parents=True, exist_ok=True)
         score.write("midi", fp=str(args.output))

@@ -75,7 +75,7 @@ class PieceSummary:
         return payload
 
 
-def sonify_sequence(sequence: str, config: SonificationConfig, source_label: str = "DNA") -> tuple[stream.Score, PieceSummary]:
+def sonify_sequence(sequence: str, config: SonificationConfig, source_label: str = "DNA", ai_pipeline: tuple | None = None) -> tuple[stream.Score, PieceSummary]:
     normalized = normalize_sequence(sequence)
     identity_seed = repeat_to_length(normalized, 2400)
 
@@ -115,6 +115,7 @@ def sonify_sequence(sequence: str, config: SonificationConfig, source_label: str
         bpm=bpm,
         summary=summary,
         config=config,
+        ai_pipeline=ai_pipeline,
     )
     return score, summary
 
@@ -127,6 +128,7 @@ def build_score(
     bpm: int,
     summary: PieceSummary,
     config: SonificationConfig,
+    ai_pipeline: tuple | None = None,
 ) -> stream.Score:
     score = stream.Score(id="DNA_Sonification")
     score.metadata = metadata.Metadata()
@@ -149,12 +151,31 @@ def build_score(
     current_position = degree_octave_to_position(progression[0], 5)
 
     for measure_index, window in enumerate(windows):
-        chord_degree = progression[measure_index % len(progression)]
-        energy = energy_score(window)
-        velocity = select_velocity(strength_score(window))
-        pattern = select_pattern(energy)
-        signature = sha_mod(window, 16, "measure-signature")
-        variation_needed = previous_signature == signature
+        if ai_pipeline is not None:
+            encoder, conductor = ai_pipeline
+            bio_out = encoder(window)
+            params = conductor(bio_out["embedding"], bio_out["anomaly_score"])
+            
+            progression_names = list(PROGRESSIONS.keys())
+            prog_name = progression_names[params["progression_idx"] % len(progression_names)]
+            chord_degree = PROGRESSIONS[prog_name][measure_index % 4]
+            
+            pattern_names = list(PATTERN_LABELS.keys())
+            pattern = pattern_names[params["pattern_idx"] % len(pattern_names)]
+            
+            velocity = int(params["velocity_mult"] * 100)
+            velocity = enforce_bounds(velocity, 30, 100)
+            energy = params["velocity_mult"] # using velocity mult as energy proxy for left hand
+            
+            signature = sha_mod(window, 16, "measure-signature")
+            variation_needed = previous_signature == signature
+        else:
+            chord_degree = progression[measure_index % len(progression)]
+            energy = energy_score(window)
+            velocity = select_velocity(strength_score(window))
+            pattern = select_pattern(energy)
+            signature = sha_mod(window, 16, "measure-signature")
+            variation_needed = previous_signature == signature
 
         step = sha_mod(window, 5, f"step-{measure_index}") + 1
         direction = 1 if sha_mod(window, 2, f"direction-{measure_index}") == 0 else -1

@@ -234,22 +234,22 @@ dna-sonify \
 
 ## Komut Satırı Parametreleri
 
-| Parametre | Açıklama |
-| --- | --- |
-| `--input` | FASTA veya ham DNA içeren dosya |
-| `--sequence` | Doğrudan ham DNA string |
-| `--accession` | NCBI accession numarası |
-| `--email` | NCBI kullanımı için zorunlu email |
-| `--api-key` | İsteğe bağlı NCBI API key |
-| `--ncbi-db` | Varsayılan `nucleotide` |
-| `--output` | MIDI çıktı dosyası |
-| `--musicxml-output` | İsteğe bağlı MusicXML dosyası |
-| `--metadata-output` | İsteğe bağlı JSON özet dosyası |
-| `--duration-seconds` | Parça süresi |
-| `--window` | Ölçü başına DNA pencere boyu |
-| `--stride` | Örtüşmeli kayma miktarı |
-| `--title` | Parça başlığı |
-| `--enable-add9` | Add9 süslemeyi açar |
+| Parametre            | Açıklama                          |
+| -------------------- | --------------------------------- |
+| `--input`            | FASTA veya ham DNA içeren dosya   |
+| `--sequence`         | Doğrudan ham DNA string           |
+| `--accession`        | NCBI accession numarası           |
+| `--email`            | NCBI kullanımı için zorunlu email |
+| `--api-key`          | İsteğe bağlı NCBI API key         |
+| `--ncbi-db`          | Varsayılan `nucleotide`           |
+| `--output`           | MIDI çıktı dosyası                |
+| `--musicxml-output`  | İsteğe bağlı MusicXML dosyası     |
+| `--metadata-output`  | İsteğe bağlı JSON özet dosyası    |
+| `--duration-seconds` | Parça süresi                      |
+| `--window`           | Ölçü başına DNA pencere boyu      |
+| `--stride`           | Örtüşmeli kayma miktarı           |
+| `--title`            | Parça başlığı                     |
+| `--enable-add9`      | Add9 süslemeyi açar               |
 
 ## Örnek Çıktılar
 
@@ -293,3 +293,4 @@ Bu komut çalıştığında:
 - `out/quick_test.json` oluşur
 - terminalde tonik, mod, progresyon, BPM ve ölçü sayısı yazdırılır
 
+agy --conversation=2765be40-76b0-4c13-be53-563e510c746e (or -c)
