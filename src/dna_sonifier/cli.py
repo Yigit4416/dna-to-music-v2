@@ -73,8 +73,20 @@ def main() -> int:
         if args.use_ai:
             print("AI hatti baslatiliyor (Bu islem biraz zaman alabilir)...")
             from .conductor import get_conductor_pipeline
+            from .bach_lstm import BachLSTM
+            import torch
+            from pathlib import Path
             weights_path = str(args.conductor_weights) if args.conductor_weights else None
-            ai_pipeline = get_conductor_pipeline(use_pretrained=args.ai_pretrained, weights_path=weights_path)
+            encoder, conductor = get_conductor_pipeline(use_pretrained=args.ai_pretrained, weights_path=weights_path)
+            
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            bach_lstm = BachLSTM(vocab_size=128).to(device)
+            if Path("bach_lstm.pt").exists():
+                bach_lstm.load_state_dict(torch.load("bach_lstm.pt", map_location=device, weights_only=True))
+                print("[bach_lstm.pt] agirliklari yuklendi...")
+            bach_lstm.eval()
+            
+            ai_pipeline = (encoder, conductor, bach_lstm)
 
         score, summary = sonify_sequence(sequence=sequence, config=config, source_label=label, ai_pipeline=ai_pipeline)
 

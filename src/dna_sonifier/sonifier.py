@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import torch
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -151,14 +152,24 @@ def build_score(
     current_position = degree_octave_to_position(progression[0], 5)
 
     for measure_index, window in enumerate(windows):
+        bach_lstm = None
         if ai_pipeline is not None:
-            encoder, conductor = ai_pipeline
+            if len(ai_pipeline) == 3:
+                encoder, conductor, bach_lstm = ai_pipeline
+            else:
+                encoder, conductor = ai_pipeline
             bio_out = encoder(window)
             params = conductor(bio_out["embedding"], bio_out["anomaly_score"])
             
             progression_names = list(PROGRESSIONS.keys())
             prog_name = progression_names[params["progression_idx"] % len(progression_names)]
             chord_degree = PROGRESSIONS[prog_name][measure_index % 4]
+            
+            # Make anomaly audible
+            if bio_out["anomaly_score"] > 0.8:
+                print(f"[!] Mutation Detected at measure {measure_index + 1}! Forcing Diminished Chord...")
+                chord_degree = 7 # diminished/harsh chord
+                params["velocity_mult"] = 0.95
             
             pattern_names = list(PATTERN_LABELS.keys())
             pattern = pattern_names[params["pattern_idx"] % len(pattern_names)]
@@ -181,16 +192,30 @@ def build_score(
         direction = 1 if sha_mod(window, 2, f"direction-{measure_index}") == 0 else -1
         add9 = config.enable_add9 and should_add9(windows, measure_index)
 
-        melody_positions, current_position = build_melody_positions(
-            chord_degree=chord_degree,
-            step=step,
-            direction=direction,
-            previous_position=current_position,
-            history=melody_history,
-            window=window,
-            measure_index=measure_index,
-            variation_needed=variation_needed,
-        )
+        if bach_lstm is not None:
+            melody_positions, current_position = build_ai_melody_positions(
+                bach_lstm=bach_lstm,
+                chord_degree=chord_degree,
+                tonic=tonic,
+                mode=mode,
+                previous_position=current_position,
+                history=melody_history,
+                window=window,
+                measure_index=measure_index,
+                variation_needed=variation_needed,
+                dna_embedding=bio_out["embedding"] if ai_pipeline is not None else None,
+            )
+        else:
+            melody_positions, current_position = build_melody_positions(
+                chord_degree=chord_degree,
+                step=step,
+                direction=direction,
+                previous_position=current_position,
+                history=melody_history,
+                window=window,
+                measure_index=measure_index,
+                variation_needed=variation_needed,
+            )
 
         melody_history.extend(melody_positions)
         right_measure = build_right_hand_measure(
@@ -240,18 +265,30 @@ def build_right_hand_measure(
     melody_voice = stream.Voice(id=f"melody-{measure_number}")
     texture_voice = stream.Voice(id=f"texture-{measure_number}")
 
-    for beat_index, position_value in enumerate(melody_positions[:3]):
-        melody_voice.append(make_note(position_to_midi(tonic, mode, position_value), 1.0, velocity))
+    if len(melody_positions) == 4:
+        for beat_index, position_value in enumerate(melody_positions[:3]):
+            melody_voice.append(make_note(position_to_midi(tonic, mode, position_value), 1.0, velocity))
 
-    final_pitch = melody_positions[3]
-    if split_last_beat:
-        first = make_note(position_to_midi(tonic, mode, final_pitch), 0.5, velocity)
-        follow_up = enforce_bounds(final_pitch + (1 if direction >= 0 else -1), MELODY_MIN_POSITION, MELODY_MAX_POSITION)
-        second = make_note(position_to_midi(tonic, mode, follow_up), 0.5, velocity)
-        melody_voice.append(first)
-        melody_voice.append(second)
+        final_pitch = melody_positions[3]
+        if split_last_beat:
+            first = make_note(position_to_midi(tonic, mode, final_pitch), 0.5, velocity)
+            follow_up = enforce_bounds(final_pitch + (1 if direction >= 0 else -1), MELODY_MIN_POSITION, MELODY_MAX_POSITION)
+            second = make_note(position_to_midi(tonic, mode, follow_up), 0.5, velocity)
+            melody_voice.append(first)
+            melody_voice.append(second)
+        else:
+            melody_voice.append(make_note(position_to_midi(tonic, mode, final_pitch), 1.0, velocity))
     else:
-        melody_voice.append(make_note(position_to_midi(tonic, mode, final_pitch), 1.0, velocity))
+        # AI generated a complex sequence (e.g. 8 notes). Group some to hit ~70% rhythm density.
+        i = 0
+        while i < len(melody_positions):
+            # Deterministically group some 8th notes into quarter notes
+            if i < len(melody_positions) - 1 and (melody_positions[i] % 10) < 3:
+                melody_voice.append(make_note(position_to_midi(tonic, mode, melody_positions[i]), 1.0, velocity))
+                i += 2
+            else:
+                melody_voice.append(make_note(position_to_midi(tonic, mode, melody_positions[i]), 0.5, velocity))
+                i += 1
 
     texture_events = build_texture_events(
         tonic=tonic,
@@ -368,6 +405,70 @@ def build_melody_positions(
     beat_four = avoid_triple_repeat(beat_four, history + melody_positions, recovery_direction)
     melody_positions.append(beat_four)
     return melody_positions, beat_four
+
+
+def build_ai_melody_positions(
+    bach_lstm,
+    chord_degree: int,
+    tonic: str,
+    mode: str,
+    previous_position: int,
+    history: list[int],
+    window: str,
+    measure_index: int,
+    variation_needed: bool,
+    dna_embedding: torch.Tensor | None = None,
+) -> tuple[list[int], int]:
+    chord_candidates = expand_chord_positions(chord_degree, octave_span=(4, 6))
+    
+    # Get last 32 pitches from history to seed the LSTM
+    seed_pitches = []
+    for pos in history[-32:]:
+        seed_pitches.append(position_to_midi(tonic, mode, pos))
+    
+    if not seed_pitches:
+        seed_pitches = [position_to_midi(tonic, mode, previous_position)]
+        
+    device = next(bach_lstm.parameters()).device
+    
+    melody_positions = []
+    current_pitches = list(seed_pitches)
+    
+    with torch.no_grad():
+        # Generate 8 notes for Bach-like 8th-note counterpoint
+        for _ in range(8):
+            x = torch.tensor([current_pitches], dtype=torch.long, device=device)
+            
+            if dna_embedding is not None:
+                # Ensure dna_embedding is exactly [batch_size, features] i.e., [1, 256]
+                dna_emb_batch = dna_embedding.view(1, -1).to(device)
+                logits, _ = bach_lstm(x, dna_embedding=dna_emb_batch)
+            else:
+                logits, _ = bach_lstm(x)
+            
+            # Use temperature scaling and multinomial sampling instead of argmax
+            # to make the melody organically varied and less repetitive.
+            temperature = 1.2
+            scaled_logits = logits[0, -1, :] / temperature
+            probs = torch.softmax(scaled_logits, dim=0)
+            next_pitch_idx = torch.multinomial(probs, 1).item()
+            
+            # Snap to strict Rule-Based positions for Dizi Kararliligi
+            best_pos = None
+            best_dist = float('inf')
+            
+            for pos in chord_candidates:
+                dist = abs(position_to_midi(tonic, mode, pos) - next_pitch_idx)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_pos = pos
+                    
+            best_pos = enforce_bounds(best_pos, MELODY_MIN_POSITION, MELODY_MAX_POSITION)
+            melody_positions.append(best_pos)
+            current_pitches.append(position_to_midi(tonic, mode, best_pos))
+            current_pitches = current_pitches[-32:]
+            
+    return melody_positions, melody_positions[-1]
 
 
 def add_measure_annotation(measure: stream.Measure, pattern: str, signature: int, summary: PieceSummary | None) -> None:

@@ -72,10 +72,21 @@ class CustomCNNEncoder(BaseBioEncoder):
         x = self.relu(self.conv2(x))
         x = self.pool(x).squeeze(-1) # [1, hidden_dim]
         
-        # Since this is a simple local CNN without language modeling, 
-        # anomaly score can just be simulated or computed based on GC content/entropy manually.
-        # Here we just output a dummy anomaly score.
+        # Calculate sequence entropy as a proxy for anomaly score (mutations increase entropy)
+        import math
+        from collections import Counter
+        counts = Counter(sequence)
+        total = len(sequence)
+        entropy = -sum((count / total) * math.log2(count / total) for count in counts.values()) if total > 0 else 0
+        # Normalize entropy (max for 4 bases is 2.0)
+        norm_entropy = entropy / 2.0
+        
+        # If the entropy is very close to maximum (e.g. > 1.96 bits out of 2.0), 
+        # it's likely a purely random, chaotic mutation region.
+        # Normal human DNA has lower entropy due to structure/motifs.
+        anomaly_score = 1.0 if (entropy > 1.96) else 0.0
+        
         return {
             "embedding": x,
-            "anomaly_score": 0.5
+            "anomaly_score": anomaly_score
         }
